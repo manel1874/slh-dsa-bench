@@ -72,38 +72,6 @@ Key sizes are **identical** between FIPS 205 and SP 800-230 parameter sets at th
 | **Verify time** | 0.105 vs 0.742 ms | 0.188 vs 1.452 ms | 0.163 vs 1.200 ms |
 | **↓ Speedup** | **−85.8% (7.1×)** | **−87.1% (7.7×)** | **−86.4% (7.4×)** |
 
-## Why Is Signing So Slow?
-
-The SP 800-230 parameter sets use **d = 1** (a single XMSS tree instead of a hypertree), which means:
-
-- **Keygen** must build a Merkle tree with **2²¹ – 2²²** leaves (~2–4 million), each requiring a full WOTS+ key generation
-- **Signing** must traverse this entire tree to produce an authentication path
-- **Verification** only needs to check one WOTS+ signature and walk one authentication path — hence the dramatic speedup
-
-This is the core trade-off: collapse the hypertree into a single layer to reduce signature size and verification time, at the cost of much slower keygen/sign. The spec explicitly states these are for "sign-once, verify-many" scenarios.
-
-### Winternitz Parameter Impact
-
-The new parameter sets also use **smaller Winternitz values** (w=4 or w=8 vs w=16 in FIPS 205):
-
-| Variant | w | Effect |
-|---|---|---|
-| FIPS 205 (all) | 16 | Fewer, longer WOTS chains → smaller WOTS signatures, slower verify |
-| SP 800-230 128-24 | 4 | More, shorter chains → faster verify, larger WOTS component |
-| SP 800-230 192-24 | 8 | Middle ground |
-| SP 800-230 256-24 | 4 | More, shorter chains → faster verify, larger WOTS component |
-
-The net effect (combined with d=1 and adjusted FORS parameters) still produces smaller total signatures.
-
-## Production Considerations
-
-SP 800-230 §3 explicitly allows **caching parts or all of the hypertree** to amortize keygen cost. A production implementation would:
-
-1. **Pre-compute and cache** the full tree at key generation time (one-time cost)
-2. Use **AVX2/AVX-512** SHA-256 parallelism (already used in these benchmarks — ~3× faster than the clean reference)
-3. Use **multi-threaded** tree construction for further speedup
-
-The verification side — the critical path for end users — is already **sub-0.2ms** with AVX2.
 
 ## Project Structure
 
@@ -129,7 +97,7 @@ slh-dsa-bench/
 
 The SPHINCS+ code is taken from [PQClean](https://github.com/PQClean/PQClean)'s **AVX2-optimized** C implementation (`crypto_sign/sphincs-sha2-*-simple/avx2/`), which uses 8-way parallel SHA-256 (`sha256x8`) and 4-way parallel SHA-512 (`sha512x4`) via AVX2 intrinsics. The shared source files (WOTS+, FORS, Merkle tree, SHA-2 hashing) were copied into `src/`, and the common SHA-2 and `randombytes` utilities from `PQClean/common/` into `common/`.
 
-For the SP 800-230 variants, new `params.h` files were created with the parameters from the NIST draft — adjusted `n`, `h`, `d=1`, Winternitz `w` (4 or 8), FORS dimensions (`k`, `a`), `lgw`, and precomputed `WOTS_LEN2`. The `hash_sha2.c` file was also patched to handle the `d=1` edge case: when `SPX_TREE_BITS = h' × (d−1) = 0`, the original code would right-shift a 64-bit value by 64 (undefined behavior in C). The fix guards this with a preprocessor conditional that sets `tree = 0` when `SPX_TREE_BITS == 0`.
+For the SP 800-230 variants, new `params.h` files were created with the parameters from the NIST draft: adjusted `n`, `h`, `d=1`, Winternitz `w` (4 or 8), FORS dimensions (`k`, `a`), `lgw`, and precomputed `WOTS_LEN2`. The `hash_sha2.c` file was also patched to handle the `d=1` edge case: when `SPX_TREE_BITS = h' × (d−1) = 0`, the original code would right-shift a 64-bit value by 64 (undefined behavior in C). The fix guards this with a preprocessor conditional that sets `tree = 0` when `SPX_TREE_BITS == 0`.
 
 ## References
 
