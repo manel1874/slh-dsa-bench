@@ -1,0 +1,10 @@
+# make output
+build/
+bench_*
+
+# stray objects / archives if compiled outside Makefile layout
+*.o
+*.a
+
+# benchmark run output
+results_*.txt
